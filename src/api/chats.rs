@@ -1,33 +1,6 @@
+use crate::api::client::{ClickUpApi, ensure_success, parse_json_ok};
 use crate::error::AppError;
-use gpui::{Image, ImageFormat};
-use reqwest::blocking::{Client, Response};
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-
-#[derive(Clone, Debug)]
-pub struct ClickUpApi {
-    base_v2_url: String,
-    base_v3_url: String,
-    token: String,
-    client: Client,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct ClickUpUser {
-    pub id: u64,
-    pub username: String,
-    pub email: String,
-    #[serde(rename = "profilePicture")]
-    pub profile_picture_url: Option<String>,
-    #[serde(skip)]
-    pub avatar_image: Option<Arc<Image>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GetUserResponse {
-    user: ClickUpUser,
-}
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ClickUpChatChannel {
@@ -66,12 +39,6 @@ impl ClickUpChatChannel {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct GetChatChannelsResponse {
-    #[serde(default)]
-    data: Vec<ClickUpChatChannel>,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct ChannelMember {
     pub id: String,
@@ -79,12 +46,6 @@ pub struct ChannelMember {
     pub username: Option<String>,
     #[serde(default)]
     pub email: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GetChannelMembersResponse {
-    #[serde(default)]
-    data: Vec<ChannelMember>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -148,6 +109,18 @@ pub struct MessageCreator {
 }
 
 #[derive(Debug, Deserialize)]
+struct GetChatChannelsResponse {
+    #[serde(default)]
+    data: Vec<ClickUpChatChannel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetChannelMembersResponse {
+    #[serde(default)]
+    data: Vec<ChannelMember>,
+}
+
+#[derive(Debug, Deserialize)]
 struct GetMessagesResponse {
     #[serde(default)]
     data: Vec<ChatMessage>,
@@ -163,74 +136,7 @@ struct SendMessageResponse {
     data: ChatMessage,
 }
 
-#[derive(Debug, Deserialize)]
-struct GetTeamResponse {
-    team: GetTeamInner,
-}
-
-#[derive(Debug, Deserialize)]
-struct GetTeamInner {
-    #[serde(default)]
-    members: Vec<GetTeamMember>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GetTeamMember {
-    user: ClickUpUser,
-}
-
 impl ClickUpApi {
-    pub fn new(token: impl Into<String>) -> Result<Self, AppError> {
-        Ok(Self {
-            base_v2_url: "https://api.clickup.com/api/v2".to_string(),
-            base_v3_url: "https://api.clickup.com/api/v3".to_string(),
-            token: token.into(),
-            client: Client::new(),
-        })
-    }
-
-    pub fn from_env() -> Result<Self, AppError> {
-        let token = std::env::var("CLICKUP_ACCESS_TOKEN")
-            .or_else(|_| std::env::var("CLICKUP_TOKEN"))
-            .map_err(|_| {
-                AppError::Config(
-                    "missing CLICKUP_ACCESS_TOKEN (or CLICKUP_TOKEN) in environment".to_string(),
-                )
-            })?;
-        Self::new(token)
-    }
-
-    pub fn get_current_user(&self) -> Result<ClickUpUser, AppError> {
-        let url = format!("{}/user", self.base_v2_url);
-        let response = self.request_get(url)?.send()?;
-        let body: GetUserResponse = parse_json_ok(response)?;
-
-        let mut user = body.user;
-        user.avatar_image = self.get_user_avatar(&user)?;
-
-        Ok(user)
-    }
-
-    fn get_user_avatar(&self, user: &ClickUpUser) -> Result<Option<Arc<Image>>, AppError> {
-        if let Some(ref avatar_url) = user.profile_picture_url {
-            let response = self.client.get(avatar_url).send()?;
-            let response = ensure_success(response)?;
-            let bytes = response.bytes()?;
-            let image = Image::from_bytes(ImageFormat::Jpeg, bytes.to_vec());
-            return Ok(Some(Arc::new(image)));
-        }
-
-        Ok(None)
-    }
-
-    pub fn get_team_members(&self, workspace_id: u64) -> Result<Vec<ClickUpUser>, AppError> {
-        let url = format!("{}/team/{workspace_id}", self.base_v2_url);
-        let response = self.request_get(url)?.send()?;
-        let body: GetTeamResponse = parse_json_ok(response)?;
-
-        Ok(body.team.members.into_iter().map(|m| m.user).collect())
-    }
-
     pub fn get_chat_channels(
         &self,
         workspace_id: u64,
@@ -298,6 +204,8 @@ impl ClickUpApi {
             .text()
             .map_err(|e| AppError::Parse(e.to_string()))?;
 
+        eprintln!("API Response: {}", text);
+
         if let Ok(body) = serde_json::from_str::<GetMessagesResponse>(&text) {
             return Ok(body.data);
         }
@@ -306,10 +214,6 @@ impl ClickUpApi {
             return Ok(messages);
         }
 
-        eprintln!(
-            "Failed to parse messages response: {}",
-            &text[..text.len().min(500)]
-        );
         Err(AppError::Parse(
             "Failed to parse messages response".to_string(),
         ))
@@ -332,41 +236,4 @@ impl ClickUpApi {
         let body: SendMessageResponse = parse_json_ok(response)?;
         Ok(body.data)
     }
-
-    fn request_get(&self, url: String) -> Result<reqwest::blocking::RequestBuilder, AppError> {
-        Ok(self
-            .client
-            .get(url)
-            .header(AUTHORIZATION, self.token.clone()))
-    }
-
-    fn request_post<T: Serialize>(
-        &self,
-        url: String,
-        body: &T,
-    ) -> Result<reqwest::blocking::RequestBuilder, AppError> {
-        Ok(self
-            .client
-            .post(url)
-            .header(AUTHORIZATION, self.token.clone())
-            .header(CONTENT_TYPE, "application/json")
-            .json(body))
-    }
-}
-
-fn ensure_success(response: Response) -> Result<Response, AppError> {
-    let status = response.status();
-    if status.is_success() {
-        Ok(response)
-    } else {
-        let body = response.text().unwrap_or_default();
-        Err(AppError::Api(format!("ClickUp returned {status}: {body}")))
-    }
-}
-
-fn parse_json_ok<T: for<'de> Deserialize<'de>>(response: Response) -> Result<T, AppError> {
-    let response = ensure_success(response)?;
-    response
-        .json()
-        .map_err(|err: reqwest::Error| AppError::Parse(err.to_string()))
 }
