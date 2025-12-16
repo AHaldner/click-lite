@@ -59,9 +59,33 @@ pub struct ChatMessage {
     pub date_updated: Option<u64>,
     pub creator: Option<MessageCreator>,
     pub date_created: Option<String>,
+    pub pending: bool,
 }
 
 impl ChatMessage {
+    pub fn new_pending(
+        temp_id: String,
+        content: String,
+        user_id: String,
+        username: String,
+    ) -> Self {
+        Self {
+            id: temp_id,
+            text: Some(content),
+            user_id: Some(user_id.clone()),
+            date: None,
+            date_updated: None,
+            creator: Some(MessageCreator {
+                id: user_id,
+                username: Some(username),
+                email: None,
+                profile_picture: None,
+            }),
+            date_created: None,
+            pending: true,
+        }
+    }
+
     pub fn display_content(&self) -> String {
         match self.text.as_deref() {
             None => "[No content]".to_string(),
@@ -98,6 +122,7 @@ pub struct MessageCreator {
 
 #[derive(Clone, Debug, Deserialize)]
 struct ChatMessageWire {
+    #[serde(deserialize_with = "deserialize_string_or_number")]
     id: String,
     #[serde(default)]
     content: Option<String>,
@@ -134,6 +159,7 @@ impl<'de> Deserialize<'de> for ChatMessage {
             date_updated: wire.date_updated,
             creator: wire.creator,
             date_created: wire.date_created,
+            pending: false,
         })
     }
 }
@@ -152,6 +178,19 @@ where
         Some(serde_json::Value::Number(number)) => Some(number.to_string()),
         _ => None,
     })
+}
+
+fn deserialize_string_or_number<'de, Des>(deserializer: Des) -> Result<String, Des::Error>
+where
+    Des: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+
+    match value {
+        serde_json::Value::String(text) => Ok(text),
+        serde_json::Value::Number(number) => Ok(number.to_string()),
+        _ => Err(serde::de::Error::custom("expected string or number")),
+    }
 }
 
 fn is_effectively_empty(input: &str) -> bool {
@@ -181,11 +220,6 @@ struct GetMessagesResponse {
 #[derive(Debug, Serialize)]
 struct SendMessageRequest {
     content: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SendMessageResponse {
-    data: ChatMessage,
 }
 
 impl ClickUpApi {
@@ -325,7 +359,21 @@ impl ClickUpApi {
             content: content.to_string(),
         };
         let response = self.request_post(url, &body)?.send()?;
-        let body: SendMessageResponse = parse_json_ok(response)?;
-        Ok(body.data)
+
+        let status = response.status();
+        let text = response
+            .text()
+            .map_err(|e| AppError::Parse(e.to_string()))?;
+
+        if !status.is_success() {
+            return Err(AppError::Api(format!("API error {}: {}", status, text)));
+        }
+
+        // API returns the message directly, not wrapped in {data: ...}
+        let parsed: ChatMessage = serde_json::from_str(&text).map_err(|e| {
+            AppError::Parse(format!("JSON parse error: {} - body was: {}", e, text))
+        })?;
+
+        Ok(parsed)
     }
 }

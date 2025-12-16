@@ -6,6 +6,7 @@ use gpui::{
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::input::{InputEvent, InputState};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct ClickLiteApp {
@@ -16,13 +17,14 @@ pub struct ClickLiteApp {
     pub channels: Vec<ClickUpChatChannel>,
     pub channels_loading: bool,
     pub selected_channel: Option<ClickUpChatChannel>,
-    pub messages: Vec<ChatMessage>,
     pub messages_loading: bool,
-    pub sending_message: bool,
     pub focus_handle: FocusHandle,
     pub scroll_handle: ScrollHandle,
     pub window_handle: AnyWindowHandle,
     pub message_input: Entity<InputState>,
+    server_messages: Vec<ChatMessage>,
+    pending_messages: Vec<ChatMessage>,
+    pending_ids: HashSet<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -42,9 +44,10 @@ impl ClickLiteApp {
             channels: Vec::new(),
             channels_loading: false,
             selected_channel: None,
-            messages: Vec::new(),
+            server_messages: Vec::new(),
+            pending_messages: Vec::new(),
+            pending_ids: HashSet::new(),
             messages_loading: false,
-            sending_message: false,
             focus_handle,
             scroll_handle: ScrollHandle::new(),
             window_handle,
@@ -62,6 +65,16 @@ impl ClickLiteApp {
         ));
 
         app
+    }
+
+    pub fn messages(&self) -> impl Iterator<Item = &ChatMessage> {
+        self.server_messages
+            .iter()
+            .chain(self.pending_messages.iter())
+    }
+
+    pub fn sending_message(&self) -> bool {
+        !self.pending_ids.is_empty()
     }
 
     fn set_message_input_placeholder(
@@ -259,7 +272,9 @@ impl ClickLiteApp {
 
     pub fn select_channel(&mut self, channel: ClickUpChatChannel, cx: &mut Context<Self>) {
         self.selected_channel = Some(channel.clone());
-        self.messages.clear();
+        self.server_messages.clear();
+        self.pending_messages.clear();
+        self.pending_ids.clear();
         self.set_message_input_placeholder(
             format!(
                 "Message {}{}",
@@ -290,7 +305,6 @@ impl ClickLiteApp {
         };
 
         let channel_id = channel_id.to_string();
-        let current_count = self.messages.len();
 
         cx.spawn(
             move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
@@ -303,13 +317,17 @@ impl ClickLiteApp {
                         .await;
 
                     let _ = this.update(&mut cx, |view, cx| {
-                        if let Ok(mut messages) = result {
-                            messages.reverse();
-                            if messages.len() != current_count {
-                                view.messages = messages;
-                                view.scroll_to_bottom();
-                                cx.notify();
-                            }
+                        if let Ok(mut new_messages) = result {
+                            new_messages.reverse();
+
+                            let confirmed_ids: HashSet<String> =
+                                new_messages.iter().map(|m| m.id.clone()).collect();
+                            view.pending_messages
+                                .retain(|p| !confirmed_ids.contains(&p.id));
+                            view.pending_ids.retain(|id| !confirmed_ids.contains(id));
+
+                            view.server_messages = new_messages;
+                            cx.notify();
                         }
                     });
                 }
@@ -360,7 +378,7 @@ impl ClickLiteApp {
                         match result {
                             Ok(mut messages) => {
                                 messages.reverse();
-                                view.messages = messages;
+                                view.server_messages = messages;
                                 view.scroll_to_bottom();
                             }
                             Err(err) => {
@@ -387,7 +405,7 @@ impl ClickLiteApp {
         let content = self.message_input.read(cx).unmask_value().to_string();
         let content = content.trim().to_string();
 
-        if self.sending_message || content.is_empty() {
+        if content.is_empty() {
             self.clear_message_input(cx);
             return;
         }
@@ -400,6 +418,8 @@ impl ClickLiteApp {
             return;
         };
 
+        let channel_id = channel.id.clone();
+
         let api = match ClickUpApi::from_env() {
             Ok(api) => api,
             Err(err) => {
@@ -408,11 +428,32 @@ impl ClickLiteApp {
             }
         };
 
-        self.sending_message = true;
+        let (user_id, username) = self
+            .user
+            .as_ref()
+            .map(|u| (u.id.to_string(), u.username.clone()))
+            .unwrap_or_else(|| ("0".to_string(), "You".to_string()));
+
+        // Clone for use in the async block to enrich the confirmed message
+        let user_id_for_enrichment = user_id.clone();
+        let username_for_enrichment = username.clone();
+
+        let temp_id = format!(
+            "pending_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        );
+
+        let pending_message =
+            ChatMessage::new_pending(temp_id.clone(), content.clone(), user_id, username);
+
+        self.pending_messages.push(pending_message);
+        self.pending_ids.insert(temp_id.clone());
+        self.scroll_to_bottom();
         self.clear_message_input(cx);
         cx.notify();
-
-        let channel_id = channel.id.clone();
 
         cx.spawn(
             move |this: gpui::WeakEntity<Self>, cx: &mut gpui::AsyncApp| {
@@ -425,13 +466,35 @@ impl ClickLiteApp {
                         .await;
 
                     let _ = this.update(&mut cx, |view, cx| {
-                        view.sending_message = false;
                         match result {
-                            Ok(message) => {
-                                view.messages.push(message);
+                            Ok(mut confirmed) => {
+                                // Enrich the confirmed message with the current user's info
+                                // (API response only has user_id, not the full creator object)
+                                if confirmed.creator.is_none() {
+                                    confirmed.creator = Some(crate::api::MessageCreator {
+                                        id: user_id_for_enrichment.clone(),
+                                        username: Some(username_for_enrichment.clone()),
+                                        email: None,
+                                        profile_picture: None,
+                                    });
+                                }
+
+                                // Remove pending and add confirmed immediately
+                                view.pending_ids.remove(&temp_id);
+                                view.pending_messages.retain(|m| m.id != temp_id);
+
+                                // Check if this message is already in server_messages
+                                // (could happen if a refresh beat us to it)
+                                if !view.server_messages.iter().any(|m| m.id == confirmed.id) {
+                                    view.server_messages.push(confirmed);
+                                }
+
                                 view.scroll_to_bottom();
                             }
-                            Err(err) => {
+                            Err(ref err) => {
+                                // Remove the pending message on error
+                                view.pending_ids.remove(&temp_id);
+                                view.pending_messages.retain(|m| m.id != temp_id);
                                 view.show_error_dialog(
                                     "Failed to send message",
                                     format!("{err}"),

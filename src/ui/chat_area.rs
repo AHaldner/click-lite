@@ -50,8 +50,9 @@ fn render_message_list(
     cx: &mut Context<ClickLiteApp>,
 ) -> gpui::AnyElement {
     let current_user_id = app.user.as_ref().map(|u| u.id.to_string());
-    let mut rendered_messages = Vec::with_capacity(app.messages.len());
-    for msg in &app.messages {
+    let messages: Vec<_> = app.messages().collect();
+    let mut rendered_messages = Vec::with_capacity(messages.len());
+    for msg in messages {
         let is_own_message = current_user_id
             .as_ref()
             .map(|id| *id == msg.creator_id())
@@ -60,24 +61,17 @@ fn render_message_list(
             .push(render_message_bubble(msg, is_own_message, window, cx).into_any_element());
     }
 
+    let has_messages = !rendered_messages.is_empty();
+
     div()
         .flex()
         .flex_col()
         .w_full()
         .gap_3()
         .when(app.messages_loading, |this| {
-            this.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(Skeleton::new().h(px(14.)).w(px(260.)))
-                    .child(Skeleton::new().h(px(14.)).w(px(420.)).secondary())
-                    .child(Skeleton::new().h(px(14.)).w(px(360.)))
-                    .child(Skeleton::new().h(px(14.)).w(px(180.)).secondary()),
-            )
+            this.child(render_messages_loading_placeholder(cx))
         })
-        .when(!app.messages_loading && app.messages.is_empty(), |this| {
+        .when(!app.messages_loading && !has_messages, |this| {
             this.child(
                 div().p_4().rounded_lg().bg(cx.theme().secondary).child(
                     div()
@@ -91,6 +85,95 @@ fn render_message_list(
         .into_any_element()
 }
 
+fn render_messages_loading_placeholder(cx: &Context<ClickLiteApp>) -> gpui::AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .children((0..6).map(|ix| {
+            let is_own_message = ix % 3 == 2;
+            render_message_skeleton(ix, is_own_message, cx)
+        }))
+        .into_any_element()
+}
+
+fn render_message_skeleton(
+    ix: usize,
+    is_own_message: bool,
+    cx: &Context<ClickLiteApp>,
+) -> gpui::AnyElement {
+    let name_width = match ix % 3 {
+        0 => px(96.),
+        1 => px(72.),
+        _ => px(110.),
+    };
+
+    let (line_1, line_2, line_3) = match ix % 3 {
+        0 => (px(280.), Some(px(210.)), None),
+        1 => (px(360.), Some(px(140.)), Some(px(220.))),
+        _ => (px(220.), None, None),
+    };
+
+    let bubble_bg = if is_own_message {
+        cx.theme().primary.opacity(0.22)
+    } else {
+        cx.theme().secondary.opacity(0.55)
+    };
+
+    let mut bubble_lines = div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(Skeleton::new().h(px(12.)).w(line_1).rounded_sm());
+    if let Some(width) = line_2 {
+        bubble_lines =
+            bubble_lines.child(Skeleton::new().h(px(12.)).w(width).rounded_sm().secondary());
+    }
+    if let Some(width) = line_3 {
+        bubble_lines = bubble_lines.child(Skeleton::new().h(px(12.)).w(width).rounded_sm());
+    }
+
+    div()
+        .id(("msg_skeleton", ix))
+        .flex()
+        .gap_3()
+        .w_full()
+        .when(is_own_message, |this| this.flex_row_reverse())
+        .child(
+            Skeleton::new()
+                .w(px(24.))
+                .h(px(24.))
+                .rounded_full()
+                .secondary(),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .max_w(px(500.0))
+                .items_start()
+                .when(is_own_message, |this| this.items_end())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .when(is_own_message, |this| this.flex_row_reverse())
+                        .child(Skeleton::new().h(px(12.)).w(name_width).rounded_sm()),
+                )
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .rounded_lg()
+                        .bg(bubble_bg)
+                        .max_w(px(500.0))
+                        .child(bubble_lines),
+                ),
+        )
+        .into_any_element()
+}
+
 fn render_message_bubble(
     msg: &crate::api::ChatMessage,
     is_own_message: bool,
@@ -100,6 +183,7 @@ fn render_message_bubble(
     let username = msg.creator_name();
     let msg_id = stable_u64_hash(&msg.id);
     let message_content = msg.display_content();
+    let is_pending = msg.pending;
 
     div()
         .id(("msg", msg_id))
@@ -107,6 +191,7 @@ fn render_message_bubble(
         .gap_3()
         .w_full()
         .when(is_own_message, |this| this.flex_row_reverse())
+        .when(is_pending, |this| this.opacity(0.6))
         .child(
             Avatar::new()
                 .name(username.clone())
@@ -132,7 +217,15 @@ fn render_message_bubble(
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(cx.theme().foreground)
                                 .child(username),
-                        ),
+                        )
+                        .when(is_pending, |this| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Sending..."),
+                            )
+                        }),
                 )
                 .child(
                     div()
@@ -336,8 +429,8 @@ fn render_input_area(
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
     let has_channel = app.selected_channel.is_some();
+    let is_sending = app.sending_message();
     let can_send = has_channel
-        && !app.sending_message
         && !app
             .message_input
             .read(cx)
@@ -363,7 +456,7 @@ fn render_input_area(
                     .label("Send")
                     .h(px(38.0))
                     .disabled(!can_send)
-                    .loading(app.sending_message)
+                    .loading(is_sending)
                     .on_click(move |_ev, _window, cx| {
                         app_entity.update(cx, |this, cx| this.send_message(cx));
                     }),
@@ -374,7 +467,7 @@ fn render_input_area(
 fn render_text_input(app: &ClickLiteApp) -> impl IntoElement {
     Input::new(&app.message_input)
         .cleanable(true)
-        .disabled(app.selected_channel.is_none() || app.sending_message)
+        .disabled(app.selected_channel.is_none())
         .w_full()
         .flex_1()
 }

@@ -19,7 +19,7 @@ pub fn render_sidebar(app: &mut ClickLiteApp, cx: &mut Context<ClickLiteApp>) ->
         .border_r_1()
         .border_color(cx.theme().border)
         .child(render_sidebar_header(cx))
-        .child(render_channels_header(app, cx))
+        .child(render_channels_header(cx))
         .child(render_channel_list(app, cx))
         .child(render_sidebar_footer(app, cx))
 }
@@ -43,18 +43,14 @@ fn render_sidebar_header(cx: &Context<ClickLiteApp>) -> impl IntoElement {
         )
 }
 
-fn render_channels_header(app: &ClickLiteApp, cx: &Context<ClickLiteApp>) -> impl IntoElement {
+fn render_channels_header(cx: &Context<ClickLiteApp>) -> impl IntoElement {
     div()
         .px_3()
         .py_2()
         .text_xs()
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(cx.theme().muted_foreground)
-        .child(if app.channels_loading {
-            "CHATS (loading...)"
-        } else {
-            "CHATS"
-        })
+        .child("CHATS")
 }
 
 fn render_channel_list(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl IntoElement {
@@ -67,7 +63,7 @@ fn render_channel_list(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> im
             .px_2()
             .children((0..10).map(|ix| {
                 Skeleton::new()
-                    .h(px(20.))
+                    .h(px(25.))
                     .w_full()
                     .when(ix % 2 == 0, |skeleton| skeleton.secondary())
                     .into_any_element()
