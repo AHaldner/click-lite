@@ -125,14 +125,6 @@ fn render_sidebar_footer(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> 
 }
 
 fn render_user_chip(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl IntoElement {
-    // let status_color = if app.clickup_loading {
-    //     cx.theme().warning
-    // } else if app.user.is_some() {
-    //     cx.theme().success
-    // } else {
-    //     cx.theme().danger
-    // };
-
     let status_color = match app {
         _ if app.clickup_loading => cx.theme().warning,
         _ if app.user.is_some() => cx.theme().success,

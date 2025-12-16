@@ -861,6 +861,7 @@ dependencies = [
  "dotenvy",
  "gpui",
  "gpui-component",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

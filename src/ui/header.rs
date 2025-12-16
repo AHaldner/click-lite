@@ -32,7 +32,7 @@ fn render_channel_title(app: &ClickLiteApp, cx: &Context<ClickLiteApp>) -> impl 
                         .map(|channel| {
                             format!("{}{}", channel.icon_prefix(), channel.display_name())
                         })
-                        .unwrap_or_else(|| "ClickLite".to_string()),
+                        .unwrap_or_else(|| "Chats".to_string()),
                 ),
         )
         .child(

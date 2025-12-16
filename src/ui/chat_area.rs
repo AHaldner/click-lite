@@ -6,6 +6,7 @@ use gpui_component::avatar::Avatar;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
 use gpui_component::skeleton::Skeleton;
+use gpui_component::text::{TextView, TextViewStyle};
 use gpui_component::{Disableable, Sizable};
 
 pub fn render_chat_area(
@@ -45,7 +46,7 @@ fn render_messages(
 
 fn render_message_list(
     app: &ClickLiteApp,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<ClickLiteApp>,
 ) -> gpui::AnyElement {
     let current_user_id = app.user.as_ref().map(|u| u.id.to_string());
@@ -55,7 +56,8 @@ fn render_message_list(
             .as_ref()
             .map(|id| *id == msg.creator_id())
             .unwrap_or(false);
-        rendered_messages.push(render_message_bubble(msg, is_own_message, cx).into_any_element());
+        rendered_messages
+            .push(render_message_bubble(msg, is_own_message, window, cx).into_any_element());
     }
 
     div()
@@ -92,6 +94,7 @@ fn render_message_list(
 fn render_message_bubble(
     msg: &crate::api::ChatMessage,
     is_own_message: bool,
+    window: &mut Window,
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
     let username = msg.creator_name();
@@ -148,53 +151,160 @@ fn render_message_bubble(
                             cx.theme().secondary_foreground
                         })
                         .max_w(px(500.0))
-                        .child(render_message_content(&message_content)),
+                        .child(render_message_content(
+                            msg_id,
+                            &message_content,
+                            is_own_message,
+                            window,
+                            cx,
+                        )),
                 ),
         )
 }
 
-fn render_message_content(content: &str) -> gpui::AnyElement {
-    let mut lines = Vec::new();
+fn render_message_content(
+    msg_id: u64,
+    content: &str,
+    is_own_message: bool,
+    window: &mut Window,
+    cx: &mut Context<ClickLiteApp>,
+) -> gpui::AnyElement {
+    let base_text_color = if is_own_message {
+        cx.theme().primary_foreground
+    } else {
+        cx.theme().secondary_foreground
+    };
 
-    for line in content.lines() {
-        if line.trim().is_empty() {
-            lines.push(div().h(px(8.)).into_any_element());
-            continue;
-        }
+    let markdown = normalize_chat_markdown(content);
+    TextView::markdown(("msg_content", msg_id), markdown, window, cx)
+        .style(TextViewStyle::default().paragraph_gap(gpui::rems(0.25)))
+        .text_sm()
+        .text_color(base_text_color)
+        .selectable(true)
+        .into_any_element()
+}
 
-        let mut normalized = String::with_capacity(line.len());
-        let mut in_prefix = true;
+fn normalize_chat_markdown(content: &str) -> String {
+    let content = fix_clickup_links(content);
 
-        for ch in line.chars() {
-            if in_prefix {
-                match ch {
-                    ' ' => normalized.push('\u{00A0}'),
-                    '\t' => normalized.extend(std::iter::repeat('\u{00A0}').take(4)),
-                    _ => {
-                        in_prefix = false;
-                        normalized.push(ch);
-                    }
-                }
-            } else {
-                normalized.push(ch);
+    let mut output = String::with_capacity(content.len() * 2);
+    let mut in_fence = false;
+    let mut fence_char: char = '`';
+    let mut fence_len: usize = 0;
+
+    let mut lines = content.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let mut close_fence_after_line = false;
+
+        if let Some((ch, len)) = fence_marker(trimmed) {
+            if !in_fence {
+                in_fence = true;
+                fence_char = ch;
+                fence_len = len;
+            } else if fence_char == ch && len >= fence_len {
+                close_fence_after_line = true;
             }
         }
 
-        lines.push(
-            div()
-                .whitespace_normal()
-                .child(normalized)
-                .into_any_element(),
-        );
+        if in_fence {
+            output.push_str(line);
+        } else {
+            output.push_str(&normalize_leading_whitespace(line));
+        }
+
+        if lines.peek().is_some() {
+            if in_fence {
+                output.push('\n');
+            } else {
+                output.push_str("\n\n");
+            }
+        }
+
+        if close_fence_after_line {
+            in_fence = false;
+        }
     }
 
-    div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .items_start()
-        .children(lines)
-        .into_any_element()
+    output
+}
+
+fn fix_clickup_links(content: &str) -> String {
+    use regex::Regex;
+
+    let Ok(link_re) = Regex::new(r"\[\s*([^\]]*?)\s*\]\(([^)]+)\)") else {
+        return content.to_string();
+    };
+
+    let result = link_re.replace_all(content, |caps: &regex::Captures| {
+        let display_text = &caps[1];
+        let url = &caps[2];
+
+        let clean_display: String = display_text
+            .replace("\\_", "_")
+            .replace("\\", "")
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let final_display = if clean_display.contains("http") {
+            clean_display
+                .split_whitespace()
+                .next()
+                .unwrap_or(&clean_display)
+                .to_string()
+        } else {
+            clean_display
+        };
+
+        let clean_url = url.replace("\\_", "_").replace("\\", "");
+
+        format!("[{}]({})", final_display, clean_url)
+    });
+
+    result.into_owned()
+}
+
+fn fence_marker(line: &str) -> Option<(char, usize)> {
+    let mut chars = line.chars();
+    let first = chars.next()?;
+    if first != '`' && first != '~' {
+        return None;
+    }
+
+    let mut count = 1;
+    for ch in chars {
+        if ch == first {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+
+    (count >= 3).then_some((first, count))
+}
+
+fn normalize_leading_whitespace(line: &str) -> String {
+    let mut normalized = String::with_capacity(line.len());
+    let mut in_prefix = true;
+
+    for ch in line.chars() {
+        if in_prefix {
+            match ch {
+                ' ' => normalized.push('\u{00A0}'),
+                '\t' => normalized.extend(std::iter::repeat('\u{00A0}').take(4)),
+                _ => {
+                    in_prefix = false;
+                    normalized.push(ch);
+                }
+            }
+        } else {
+            normalized.push(ch);
+        }
+    }
+
+    normalized
 }
 
 fn render_welcome_message(cx: &Context<ClickLiteApp>) -> gpui::AnyElement {

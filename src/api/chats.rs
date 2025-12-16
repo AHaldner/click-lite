@@ -50,47 +50,24 @@ pub struct ChannelMember {
     pub email: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ChatMessage {
     pub id: String,
-    #[serde(default)]
-    pub content: Option<String>,
-    #[serde(default)]
-    pub plain_text: Option<String>,
-    #[serde(
-        default,
-        alias = "creator_id",
-        alias = "creatorId",
-        alias = "user_id",
-        alias = "userId",
-        deserialize_with = "deserialize_opt_string_or_number"
-    )]
+    text: Option<String>,
     pub user_id: Option<String>,
-    #[serde(default)]
     pub date: Option<u64>,
-    #[serde(default)]
     pub date_updated: Option<u64>,
-    //TODO: Fetch this from the creator_id
-    #[serde(default)]
     pub creator: Option<MessageCreator>,
-    #[serde(default)]
     pub date_created: Option<String>,
 }
 
 impl ChatMessage {
-    //TODO: Get emojis and other message types
     pub fn display_content(&self) -> String {
-        self.plain_text
-            .clone()
-            .or_else(|| self.content.clone())
-            .map(|message| {
-                if message.is_empty() {
-                    "[Empty message]".to_string()
-                } else {
-                    message
-                }
-            })
-            .unwrap_or_else(|| "[No content]".to_string())
+        match self.text.as_deref() {
+            None => "[No content]".to_string(),
+            Some(message) if is_effectively_empty(message) => "[Empty message]".to_string(),
+            Some(message) => message.to_string(),
+        }
     }
 
     pub fn creator_name(&self) -> String {
@@ -119,6 +96,48 @@ pub struct MessageCreator {
     pub profile_picture: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct ChatMessageWire {
+    id: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(
+        default,
+        alias = "creator_id",
+        alias = "creatorId",
+        alias = "user_id",
+        alias = "userId",
+        deserialize_with = "deserialize_opt_string_or_number"
+    )]
+    user_id: Option<String>,
+    #[serde(default)]
+    date: Option<u64>,
+    #[serde(default)]
+    date_updated: Option<u64>,
+    #[serde(default)]
+    creator: Option<MessageCreator>,
+    #[serde(default)]
+    date_created: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for ChatMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = ChatMessageWire::deserialize(deserializer)?;
+        Ok(Self {
+            id: wire.id,
+            text: wire.content,
+            user_id: wire.user_id,
+            date: wire.date,
+            date_updated: wire.date_updated,
+            creator: wire.creator,
+            date_created: wire.date_created,
+        })
+    }
+}
+
 fn deserialize_opt_string_or_number<'de, Des>(
     deserializer: Des,
 ) -> Result<Option<String>, Des::Error>
@@ -133,6 +152,12 @@ where
         Some(serde_json::Value::Number(number)) => Some(number.to_string()),
         _ => None,
     })
+}
+
+fn is_effectively_empty(input: &str) -> bool {
+    input
+        .chars()
+        .all(|ch| ch.is_whitespace() || ch == '\u{00A0}')
 }
 
 #[derive(Debug, Deserialize)]
