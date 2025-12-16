@@ -2,12 +2,17 @@ use crate::app::ClickLiteApp;
 use crate::ui::stable_u64_hash;
 use gpui::{Context, IntoElement, Window, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
+use gpui_component::Sizable;
 use gpui_component::avatar::Avatar;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
 use gpui_component::skeleton::Skeleton;
 use gpui_component::text::{TextView, TextViewStyle};
-use gpui_component::{Disableable, Sizable};
+use regex::Regex;
+use std::sync::LazyLock;
+
+static LINK_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[\s*([^\]]*?)\s*\]\(([^)]+)\)").expect("Invalid regex"));
 
 pub fn render_chat_area(
     app: &mut ClickLiteApp,
@@ -323,13 +328,7 @@ fn normalize_chat_markdown(content: &str) -> String {
 }
 
 fn fix_clickup_links(content: &str) -> String {
-    use regex::Regex;
-
-    let Ok(link_re) = Regex::new(r"\[\s*([^\]]*?)\s*\]\(([^)]+)\)") else {
-        return content.to_string();
-    };
-
-    let result = link_re.replace_all(content, |caps: &regex::Captures| {
+    let result = LINK_REGEX.replace_all(content, |caps: &regex::Captures| {
         let display_text = &caps[1];
         let url = &caps[2];
 
@@ -429,15 +428,6 @@ fn render_input_area(
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
     let has_channel = app.selected_channel.is_some();
-    let is_sending = app.sending_message();
-    let can_send = has_channel
-        && !app
-            .message_input
-            .read(cx)
-            .unmask_value()
-            .as_ref()
-            .trim()
-            .is_empty();
     let app_entity = cx.entity();
 
     div()
@@ -455,8 +445,6 @@ fn render_input_area(
                     .primary()
                     .label("Send")
                     .h(px(38.0))
-                    .disabled(!can_send)
-                    .loading(is_sending)
                     .on_click(move |_ev, _window, cx| {
                         app_entity.update(cx, |this, cx| this.send_message(cx));
                     }),
