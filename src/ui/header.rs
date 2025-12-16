@@ -30,14 +30,16 @@ fn render_channel_title(app: &ClickLiteApp) -> impl IntoElement {
                 .child(
                     app.selected_channel
                         .as_ref()
-                        .map(|c| format!("{}{}", c.icon_prefix(), c.display_name()))
+                        .map(|channel| {
+                            format!("{}{}", channel.icon_prefix(), channel.display_name())
+                        })
                         .unwrap_or_else(|| "ClickLite".to_string()),
                 ),
         )
         .child(
             app.selected_channel
                 .as_ref()
-                .map(|c| {
+                .map(|channel| {
                     div()
                         .text_xs()
                         .text_color(colors::text_secondary())
@@ -45,7 +47,7 @@ fn render_channel_title(app: &ClickLiteApp) -> impl IntoElement {
                         .py_0p5()
                         .rounded_md()
                         .bg(colors::card_bg())
-                        .child(c.channel_type.clone())
+                        .child(channel.channel_type.clone())
                         .into_any_element()
                 })
                 .unwrap_or_else(|| div().into_any_element()),
@@ -81,7 +83,7 @@ fn render_user_avatar(app: &ClickLiteApp) -> impl IntoElement {
         let initial = app
             .user
             .as_ref()
-            .and_then(|u| u.username.chars().next())
+            .and_then(|user| user.username.chars().next())
             .unwrap_or('?')
             .to_string();
         div()

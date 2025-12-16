@@ -1,6 +1,8 @@
 use crate::api::client::{ClickUpApi, ensure_success, parse_json_ok};
 use crate::error::AppError;
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ClickUpChatChannel {
@@ -55,12 +57,20 @@ pub struct ChatMessage {
     pub content: Option<String>,
     #[serde(default)]
     pub plain_text: Option<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "creator_id",
+        alias = "creatorId",
+        alias = "user_id",
+        alias = "userId",
+        deserialize_with = "deserialize_opt_string_or_number"
+    )]
     pub user_id: Option<String>,
     #[serde(default)]
     pub date: Option<u64>,
     #[serde(default)]
     pub date_updated: Option<u64>,
+    //TODO: Fetch this from the creator_id
     #[serde(default)]
     pub creator: Option<MessageCreator>,
     #[serde(default)]
@@ -68,15 +78,16 @@ pub struct ChatMessage {
 }
 
 impl ChatMessage {
+    //TODO: Get emojis and other message types
     pub fn display_content(&self) -> String {
         self.plain_text
             .clone()
             .or_else(|| self.content.clone())
-            .map(|s| {
-                if s.is_empty() {
+            .map(|message| {
+                if message.is_empty() {
                     "[Empty message]".to_string()
                 } else {
-                    s
+                    message
                 }
             })
             .unwrap_or_else(|| "[No content]".to_string())
@@ -85,14 +96,14 @@ impl ChatMessage {
     pub fn creator_name(&self) -> String {
         self.creator
             .as_ref()
-            .and_then(|c| c.username.clone())
-            .unwrap_or_else(|| "User".to_string())
+            .and_then(|creator| creator.username.clone().or_else(|| creator.email.clone()))
+            .unwrap_or_else(|| "Unknown User".to_string())
     }
 
     pub fn creator_id(&self) -> String {
         self.user_id
             .clone()
-            .or_else(|| self.creator.as_ref().map(|c| c.id.clone()))
+            .or_else(|| self.creator.as_ref().map(|creator| creator.id.clone()))
             .unwrap_or_else(|| "0".to_string())
     }
 }
@@ -106,6 +117,22 @@ pub struct MessageCreator {
     pub email: Option<String>,
     #[serde(rename = "profilePicture", default)]
     pub profile_picture: Option<String>,
+}
+
+fn deserialize_opt_string_or_number<'de, Des>(
+    deserializer: Des,
+) -> Result<Option<String>, Des::Error>
+where
+    Des: Deserializer<'de>,
+{
+    let maybe_value = Option::<serde_json::Value>::deserialize(deserializer)?;
+
+    Ok(match maybe_value {
+        None => None,
+        Some(serde_json::Value::String(text)) => Some(text),
+        Some(serde_json::Value::Number(number)) => Some(number.to_string()),
+        _ => None,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,7 +189,7 @@ impl ClickUpApi {
                                 true
                             }
                         })
-                        .filter_map(|m| m.username.clone())
+                        .filter_map(|member| member.username.clone())
                         .collect();
 
                     if !other_members.is_empty() {
@@ -204,19 +231,59 @@ impl ClickUpApi {
             .text()
             .map_err(|e| AppError::Parse(e.to_string()))?;
 
-        eprintln!("API Response: {}", text);
+        let mut messages = match serde_json::from_str::<GetMessagesResponse>(&text) {
+            Ok(body) => body.data,
+            Err(_) => match serde_json::from_str::<Vec<ChatMessage>>(&text) {
+                Ok(messages) => messages,
+                Err(_) => {
+                    return Err(AppError::Parse(
+                        "Failed to parse messages response".to_string(),
+                    ));
+                }
+            },
+        };
 
-        if let Ok(body) = serde_json::from_str::<GetMessagesResponse>(&text) {
-            return Ok(body.data);
+        let needs_creator_enrichment =
+            messages
+                .iter()
+                .any(|message| match message.creator.as_ref() {
+                    None => true,
+                    Some(creator) => creator.username.is_none() && creator.email.is_none(),
+                });
+
+        if needs_creator_enrichment {
+            if let Ok(members) = self.get_channel_members(workspace_id, channel_id) {
+                let members_by_id: HashMap<&str, &ChannelMember> = members
+                    .iter()
+                    .map(|member| (member.id.as_str(), member))
+                    .collect();
+
+                for message in &mut messages {
+                    if matches!(
+                        message.creator.as_ref(),
+                        Some(creator) if creator.username.is_some() || creator.email.is_some()
+                    ) {
+                        continue;
+                    }
+
+                    let creator_id = message.creator_id();
+                    if creator_id == "0" {
+                        continue;
+                    }
+
+                    if let Some(member) = members_by_id.get(creator_id.as_str()) {
+                        message.creator = Some(MessageCreator {
+                            id: (*member).id.clone(),
+                            username: (*member).username.clone(),
+                            email: (*member).email.clone(),
+                            profile_picture: None,
+                        });
+                    }
+                }
+            }
         }
 
-        if let Ok(messages) = serde_json::from_str::<Vec<ChatMessage>>(&text) {
-            return Ok(messages);
-        }
-
-        Err(AppError::Parse(
-            "Failed to parse messages response".to_string(),
-        ))
+        Ok(messages)
     }
 
     pub fn send_message(

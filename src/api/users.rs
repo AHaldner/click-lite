@@ -65,6 +65,11 @@ impl ClickUpApi {
         let response = self.request_get(url)?.send()?;
         let body: GetTeamResponse = parse_json_ok(response)?;
 
-        Ok(body.team.members.into_iter().map(|m| m.user).collect())
+        Ok(body
+            .team
+            .members
+            .into_iter()
+            .map(|member| member.user)
+            .collect())
     }
 }

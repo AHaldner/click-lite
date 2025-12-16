@@ -67,7 +67,7 @@ fn render_channel_list(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> im
             let is_selected = app
                 .selected_channel
                 .as_ref()
-                .map(|c| c.id == channel.id)
+                .map(|chat| chat.id == channel.id)
                 .unwrap_or(false);
             let is_dm = channel.channel_type == "DM";
 
