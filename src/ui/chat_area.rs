@@ -4,9 +4,9 @@ use gpui::{Context, IntoElement, Window, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::avatar::Avatar;
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{Disableable, Sizable};
 use gpui_component::input::Input;
 use gpui_component::skeleton::Skeleton;
+use gpui_component::{Disableable, Sizable};
 
 pub fn render_chat_area(
     app: &mut ClickLiteApp,
@@ -55,8 +55,7 @@ fn render_message_list(
             .as_ref()
             .map(|id| *id == msg.creator_id())
             .unwrap_or(false);
-        rendered_messages
-            .push(render_message_bubble(msg, is_own_message, cx).into_any_element());
+        rendered_messages.push(render_message_bubble(msg, is_own_message, cx).into_any_element());
     }
 
     div()
@@ -106,17 +105,18 @@ fn render_message_bubble(
         .w_full()
         .when(is_own_message, |this| this.flex_row_reverse())
         .child(
-            Avatar::new().name(username.clone()).with_size(gpui_component::Size::Small),
+            Avatar::new()
+                .name(username.clone())
+                .with_size(gpui_component::Size::Small),
         )
         .child(
             div()
                 .flex()
                 .flex_col()
                 .gap_1()
-                .flex_1()
-                .min_w_0()
-                .w_full()
                 .max_w(px(500.0))
+                .items_start()
+                .when(is_own_message, |this| this.items_end())
                 .child(
                     div()
                         .flex()
@@ -136,15 +136,18 @@ fn render_message_bubble(
                         .px_3()
                         .py_2()
                         .rounded_lg()
-                        .bg(if is_own_message { cx.theme().primary } else { cx.theme().secondary })
+                        .bg(if is_own_message {
+                            cx.theme().primary
+                        } else {
+                            cx.theme().secondary
+                        })
                         .text_sm()
                         .text_color(if is_own_message {
                             cx.theme().primary_foreground
                         } else {
                             cx.theme().secondary_foreground
                         })
-                        .w_full()
-                        .min_w_0()
+                        .max_w(px(500.0))
                         .child(render_message_content(&message_content)),
                 ),
         )
@@ -179,8 +182,6 @@ fn render_message_content(content: &str) -> gpui::AnyElement {
 
         lines.push(
             div()
-                .w_full()
-                .min_w_0()
                 .whitespace_normal()
                 .child(normalized)
                 .into_any_element(),
@@ -191,8 +192,7 @@ fn render_message_content(content: &str) -> gpui::AnyElement {
         .flex()
         .flex_col()
         .gap_1()
-        .w_full()
-        .min_w_0()
+        .items_start()
         .children(lines)
         .into_any_element()
 }
@@ -251,6 +251,7 @@ fn render_input_area(
                 Button::new("send_button")
                     .primary()
                     .label("Send")
+                    .h(px(38.0))
                     .disabled(!can_send)
                     .loading(app.sending_message)
                     .on_click(move |_ev, _window, cx| {
@@ -267,5 +268,3 @@ fn render_text_input(app: &ClickLiteApp) -> impl IntoElement {
         .w_full()
         .flex_1()
 }
-
- 

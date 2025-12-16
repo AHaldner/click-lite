@@ -1,13 +1,31 @@
+use std::path::PathBuf;
+
 use click_lite::app::ClickLiteApp;
-use gpui::{App, Application, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
-use gpui_component::Root;
+use click_lite::error::AppError;
+use gpui::{
+    App, Application, Bounds, SharedString, WindowBounds, WindowOptions, prelude::*, px, size,
+};
 use gpui_component::input::InputState;
+use gpui_component::{Root, Theme, ThemeRegistry};
 
 fn main() {
     let _ = dotenvy::dotenv();
 
     Application::new().run(|cx: &mut App| {
         gpui_component::init(cx);
+
+        let theme_name = SharedString::from("Tokyo Night");
+
+        if let Err(error) = ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
+            if let Some(theme) = ThemeRegistry::global(cx).themes().get(&theme_name).cloned() {
+                Theme::global_mut(cx).apply_config(&theme);
+                cx.refresh_windows();
+            }
+        }) {
+            AppError::Config(format!(
+                "Failed to watch themes directory './themes': {error}"
+            ));
+        }
 
         let bounds = Bounds::centered(None, size(px(980.), px(640.0)), cx);
         cx.open_window(
