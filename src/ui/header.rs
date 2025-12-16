@@ -1,6 +1,7 @@
 use crate::app::ClickLiteApp;
-use crate::ui::colors;
-use gpui::{Context, IntoElement, div, img, prelude::*, px, rgb};
+use gpui::{Context, IntoElement, div, img, prelude::*, px};
+use gpui_component::ActiveTheme as _;
+use gpui_component::avatar::Avatar;
 
 pub fn render_header(app: &mut ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl IntoElement {
     div()
@@ -11,14 +12,14 @@ pub fn render_header(app: &mut ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> 
         .items_center()
         .justify_between()
         .px_4()
-        .bg(colors::header_bg())
+        .bg(cx.theme().secondary)
         .border_b_1()
-        .border_color(colors::divider())
-        .child(render_channel_title(app))
+        .border_color(cx.theme().border)
+        .child(render_channel_title(app, cx))
         .child(render_user_chip(app, cx))
 }
 
-fn render_channel_title(app: &ClickLiteApp) -> impl IntoElement {
+fn render_channel_title(app: &ClickLiteApp, cx: &Context<ClickLiteApp>) -> impl IntoElement {
     div()
         .flex()
         .items_center()
@@ -42,11 +43,11 @@ fn render_channel_title(app: &ClickLiteApp) -> impl IntoElement {
                 .map(|channel| {
                     div()
                         .text_xs()
-                        .text_color(colors::text_secondary())
+                        .text_color(cx.theme().muted_foreground)
                         .px_2()
                         .py_0p5()
                         .rounded_md()
-                        .bg(colors::card_bg())
+                        .bg(cx.theme().muted.opacity(0.25))
                         .child(channel.channel_type.clone())
                         .into_any_element()
                 })
@@ -63,43 +64,30 @@ fn render_user_chip(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl 
         .px_2()
         .py_1()
         .rounded_md()
-        .bg(colors::card_bg())
+        .bg(cx.theme().popover)
+        .border_1()
+        .border_color(cx.theme().border)
         .on_click(cx.listener(|this, _ev, _window, cx| {
             this.fetch_clickup_user(cx);
         }))
         .child(render_user_avatar(app))
-        .child(render_user_info(app))
+        .child(render_user_info(app, cx))
 }
 
 fn render_user_avatar(app: &ClickLiteApp) -> impl IntoElement {
     if let Some(avatar) = app.user_avatar_image() {
-        img(avatar)
-            .size(px(28.0))
-            .rounded_full()
-            .border_1()
-            .border_color(colors::divider())
-            .into_any_element()
+        img(avatar).size(px(28.0)).rounded_full().into_any_element()
     } else {
-        let initial = app
+        let name = app
             .user
             .as_ref()
-            .and_then(|user| user.username.chars().next())
-            .unwrap_or('?')
-            .to_string();
-        div()
-            .size(px(28.0))
-            .rounded_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgb(0x3a3d42))
-            .text_sm()
-            .child(initial)
-            .into_any_element()
+            .map(|user| user.username.clone())
+            .unwrap_or_else(|| "User".to_string());
+        Avatar::new().name(name).into_any_element()
     }
 }
 
-fn render_user_info(app: &ClickLiteApp) -> impl IntoElement {
+fn render_user_info(app: &ClickLiteApp, cx: &Context<ClickLiteApp>) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
@@ -108,7 +96,7 @@ fn render_user_info(app: &ClickLiteApp) -> impl IntoElement {
         .child(
             div()
                 .text_xs()
-                .text_color(rgb(0xb8bcc4))
+                .text_color(cx.theme().muted_foreground)
                 .child(if app.clickup_loading {
                     "Connecting…"
                 } else {
