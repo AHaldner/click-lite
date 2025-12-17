@@ -2,6 +2,7 @@ use crate::app::ClickLiteApp;
 use crate::ui::stable_u64_hash;
 use gpui::{Context, IntoElement, Window, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
+use gpui_component::Disableable;
 use gpui_component::Sizable;
 use gpui_component::avatar::Avatar;
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -130,10 +131,12 @@ fn render_message_skeleton(
         .flex_col()
         .gap_1()
         .child(Skeleton::new().h(px(12.)).w(line_1).rounded_sm());
+
     if let Some(width) = line_2 {
         bubble_lines =
             bubble_lines.child(Skeleton::new().h(px(12.)).w(width).rounded_sm().secondary());
     }
+
     if let Some(width) = line_3 {
         bubble_lines = bubble_lines.child(Skeleton::new().h(px(12.)).w(width).rounded_sm());
     }
@@ -428,6 +431,14 @@ fn render_input_area(
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
     let has_channel = app.selected_channel.is_some();
+    let can_send = has_channel
+        && !app
+            .message_input
+            .read(cx)
+            .unmask_value()
+            .as_ref()
+            .trim()
+            .is_empty();
     let app_entity = cx.entity();
 
     div()
@@ -445,6 +456,7 @@ fn render_input_area(
                     .primary()
                     .label("Send")
                     .h(px(38.0))
+                    .disabled(can_send)
                     .on_click(move |_ev, _window, cx| {
                         app_entity.update(cx, |this, cx| this.send_message(cx));
                     }),

@@ -185,12 +185,10 @@ fn render_user_info(app: &ClickLiteApp, cx: &Context<ClickLiteApp>) -> impl Into
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(if app.clickup_loading {
-                    "Connecting…"
-                } else if app.user.is_some() {
-                    "Connected"
-                } else {
-                    "Click to connect"
+                .child(match app {
+                    _ if app.clickup_loading => "Connecting…",
+                    _ if app.user.is_some() => "Connected",
+                    _ => "Click to connect",
                 }),
         )
 }

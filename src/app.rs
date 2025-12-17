@@ -434,7 +434,6 @@ impl ClickLiteApp {
             .map(|u| (u.id.to_string(), u.username.clone()))
             .unwrap_or_else(|| ("0".to_string(), "You".to_string()));
 
-        // Clone for use in the async block to enrich the confirmed message
         let user_id_for_enrichment = user_id.clone();
         let username_for_enrichment = username.clone();
 
@@ -468,8 +467,6 @@ impl ClickLiteApp {
                     let _ = this.update(&mut cx, |view, cx| {
                         match result {
                             Ok(mut confirmed) => {
-                                // Enrich the confirmed message with the current user's info
-                                // (API response only has user_id, not the full creator object)
                                 if confirmed.creator.is_none() {
                                     confirmed.creator = Some(crate::api::MessageCreator {
                                         id: user_id_for_enrichment.clone(),
@@ -479,12 +476,9 @@ impl ClickLiteApp {
                                     });
                                 }
 
-                                // Remove pending and add confirmed immediately
                                 view.pending_ids.remove(&temp_id);
                                 view.pending_messages.retain(|m| m.id != temp_id);
 
-                                // Check if this message is already in server_messages
-                                // (could happen if a refresh beat us to it)
                                 if !view.server_messages.iter().any(|m| m.id == confirmed.id) {
                                     view.server_messages.push(confirmed);
                                 }
@@ -492,7 +486,6 @@ impl ClickLiteApp {
                                 view.scroll_to_bottom();
                             }
                             Err(ref err) => {
-                                // Remove the pending message on error
                                 view.pending_ids.remove(&temp_id);
                                 view.pending_messages.retain(|m| m.id != temp_id);
                                 view.show_error_dialog(
