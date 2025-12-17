@@ -190,31 +190,14 @@ fn render_message_bubble(
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
     let username = msg.creator_name();
-    let avatar_url = msg
-        .creator
-        .as_ref()
-        .and_then(|creator| creator.profile_picture.as_deref());
     let msg_id = stable_u64_hash(&msg.id);
     let message_content = msg.display_content();
     let is_pending = msg.pending;
 
-    println!(
-        "{}",
-        msg.creator.as_ref().map_or("unknown", |c| c
-            .profile_picture
-            .as_deref()
-            .unwrap_or("no pic"))
-    );
-
-    let avatar = match avatar_url {
-        Some(url) => Avatar::new()
-            .src(url)
-            .name(username.clone())
-            .with_size(gpui_component::Size::Small),
-        None => Avatar::new()
-            .name(username.clone())
-            .with_size(gpui_component::Size::Small),
-    };
+    // Note: Profile pictures for message creators are not available without ClickUp Enterprise plan
+    let avatar = Avatar::new()
+        .name(username.clone())
+        .with_size(gpui_component::Size::Small);
 
     div()
         .id(("msg", msg_id))
@@ -475,7 +458,7 @@ fn render_input_area(
                     .primary()
                     .label("Send")
                     .h(px(38.0))
-                    .disabled(can_send)
+                    .disabled(!can_send)
                     .on_click(move |_ev, _window, cx| {
                         app_entity.update(cx, |this, cx| this.send_message(cx));
                     }),

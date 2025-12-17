@@ -48,6 +48,8 @@ pub struct ChannelMember {
     pub username: Option<String>,
     #[serde(default)]
     pub email: Option<String>,
+    #[serde(rename = "profilePicture", default)]
+    pub profile_picture: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -337,8 +339,7 @@ impl ClickUpApi {
                         id: member.id.clone(),
                         username: member.username.clone(),
                         email: member.email.clone(),
-                        //TODO: Actually fetch profile pictures for members
-                        profile_picture: None,
+                        profile_picture: member.profile_picture.clone(),
                     });
                 }
             }

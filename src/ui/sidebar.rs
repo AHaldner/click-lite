@@ -1,6 +1,6 @@
 use crate::app::ClickLiteApp;
 use crate::ui::stable_u64_hash;
-use gpui::{Context, IntoElement, div, img, prelude::*, px};
+use gpui::{Context, IntoElement, img, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::Selectable;
 use gpui_component::Sizable;
@@ -155,14 +155,18 @@ fn render_user_chip(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl 
 }
 
 fn render_user_avatar(app: &ClickLiteApp) -> impl IntoElement {
-    if let Some(avatar) = app.user_avatar_image() {
-        img(avatar).size(px(26.0)).rounded_full().into_any_element()
+    let name = app
+        .user
+        .as_ref()
+        .map(|user| user.username.clone())
+        .unwrap_or_else(|| "User".to_string());
+
+    if let Some(avatar_image) = app.user_avatar_image() {
+        img(avatar_image)
+            .size(px(24.))
+            .rounded_full()
+            .into_any_element()
     } else {
-        let name = app
-            .user
-            .as_ref()
-            .map(|user| user.username.clone())
-            .unwrap_or_else(|| "User".to_string());
         Avatar::new()
             .name(name)
             .with_size(gpui_component::Size::Small)

@@ -43,21 +43,16 @@ impl ClickUpApi {
         let body: GetUserResponse = parse_json_ok(response)?;
 
         let mut user = body.user;
-        user.avatar_image = self.get_user_avatar(&user)?;
-
+        user.avatar_image = self.fetch_avatar_image(&user.profile_picture_url);
         Ok(user)
     }
 
-    fn get_user_avatar(&self, user: &ClickUpUser) -> Result<Option<Arc<Image>>, AppError> {
-        if let Some(ref avatar_url) = user.profile_picture_url {
-            let response = self.client.get(avatar_url).send()?;
-            let response = crate::api::client::ensure_success(response)?;
-            let bytes = response.bytes()?;
-            let image = Image::from_bytes(ImageFormat::Jpeg, bytes.to_vec());
-            return Ok(Some(Arc::new(image)));
-        }
-
-        Ok(None)
+    fn fetch_avatar_image(&self, url: &Option<String>) -> Option<Arc<Image>> {
+        let avatar_url = url.as_ref()?;
+        let response = self.client.get(avatar_url).send().ok()?;
+        let response = crate::api::client::ensure_success(response).ok()?;
+        let bytes = response.bytes().ok()?;
+        Some(Arc::new(Image::from_bytes(ImageFormat::Jpeg, bytes.to_vec())))
     }
 
     pub fn get_team_members(&self, workspace_id: u64) -> Result<Vec<ClickUpUser>, AppError> {
