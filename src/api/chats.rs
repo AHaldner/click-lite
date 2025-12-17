@@ -19,10 +19,10 @@ pub struct ClickUpChatChannel {
 
 impl ClickUpChatChannel {
     pub fn display_name(&self) -> String {
-        if let Some(ref name) = self.name {
-            if !name.is_empty() {
-                return name.clone();
-            }
+        if let Some(ref name) = self.name
+            && !name.is_empty()
+        {
+            return name.clone();
         }
 
         match self.channel_type.as_str() {
@@ -237,23 +237,24 @@ impl ClickUpApi {
 
         let mut channels = body.data;
         for channel in &mut channels {
-            if channel.channel_type == "DM" && channel.name.is_none() {
-                if let Ok(members) = self.get_channel_members(workspace_id, &channel.id) {
-                    let other_members: Vec<_> = members
-                        .iter()
-                        .filter(|m| {
-                            if let Some(current_id) = current_user_id {
-                                m.id.parse::<u64>().ok() != Some(current_id)
-                            } else {
-                                true
-                            }
-                        })
-                        .filter_map(|member| member.username.clone())
-                        .collect();
+            if channel.channel_type == "DM"
+                && channel.name.is_none()
+                && let Ok(members) = self.get_channel_members(workspace_id, &channel.id)
+            {
+                let other_members: Vec<_> = members
+                    .iter()
+                    .filter(|m| {
+                        if let Some(current_id) = current_user_id {
+                            m.id.parse::<u64>().ok() != Some(current_id)
+                        } else {
+                            true
+                        }
+                    })
+                    .filter_map(|member| member.username.clone())
+                    .collect();
 
-                    if !other_members.is_empty() {
-                        channel.name = Some(other_members.join(", "));
-                    }
+                if !other_members.is_empty() {
+                    channel.name = Some(other_members.join(", "));
                 }
             }
         }
@@ -310,34 +311,35 @@ impl ClickUpApi {
                     Some(creator) => creator.username.is_none() && creator.email.is_none(),
                 });
 
-        if needs_creator_enrichment {
-            if let Ok(members) = self.get_channel_members(workspace_id, channel_id) {
-                let members_by_id: HashMap<&str, &ChannelMember> = members
-                    .iter()
-                    .map(|member| (member.id.as_str(), member))
-                    .collect();
+        if needs_creator_enrichment
+            && let Ok(members) = self.get_channel_members(workspace_id, channel_id)
+        {
+            let members_by_id: HashMap<&str, &ChannelMember> = members
+                .iter()
+                .map(|member| (member.id.as_str(), member))
+                .collect();
 
-                for message in &mut messages {
-                    if matches!(
-                        message.creator.as_ref(),
-                        Some(creator) if creator.username.is_some() || creator.email.is_some()
-                    ) {
-                        continue;
-                    }
+            for message in &mut messages {
+                if matches!(
+                    message.creator.as_ref(),
+                    Some(creator) if creator.username.is_some() || creator.email.is_some()
+                ) {
+                    continue;
+                }
 
-                    let creator_id = message.creator_id();
-                    if creator_id == "0" {
-                        continue;
-                    }
+                let creator_id = message.creator_id();
+                if creator_id == "0" {
+                    continue;
+                }
 
-                    if let Some(member) = members_by_id.get(creator_id.as_str()) {
-                        message.creator = Some(MessageCreator {
-                            id: (*member).id.clone(),
-                            username: (*member).username.clone(),
-                            email: (*member).email.clone(),
-                            profile_picture: None,
-                        });
-                    }
+                if let Some(member) = members_by_id.get(creator_id.as_str()) {
+                    message.creator = Some(MessageCreator {
+                        id: member.id.clone(),
+                        username: member.username.clone(),
+                        email: member.email.clone(),
+                        //TODO: Actually fetch profile pictures for members
+                        profile_picture: None,
+                    });
                 }
             }
         }
@@ -369,7 +371,6 @@ impl ClickUpApi {
             return Err(AppError::Api(format!("API error {}: {}", status, text)));
         }
 
-        // API returns the message directly, not wrapped in {data: ...}
         let parsed: ChatMessage = serde_json::from_str(&text).map_err(|e| {
             AppError::Parse(format!("JSON parse error: {} - body was: {}", e, text))
         })?;

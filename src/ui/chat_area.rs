@@ -10,6 +10,7 @@ use gpui_component::input::Input;
 use gpui_component::skeleton::Skeleton;
 use gpui_component::text::{TextView, TextViewStyle};
 use regex::Regex;
+use std::iter::repeat_n;
 use std::sync::LazyLock;
 
 static LINK_REGEX: LazyLock<Regex> =
@@ -189,9 +190,31 @@ fn render_message_bubble(
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
     let username = msg.creator_name();
+    let avatar_url = msg
+        .creator
+        .as_ref()
+        .and_then(|creator| creator.profile_picture.as_deref());
     let msg_id = stable_u64_hash(&msg.id);
     let message_content = msg.display_content();
     let is_pending = msg.pending;
+
+    println!(
+        "{}",
+        msg.creator.as_ref().map_or("unknown", |c| c
+            .profile_picture
+            .as_deref()
+            .unwrap_or("no pic"))
+    );
+
+    let avatar = match avatar_url {
+        Some(url) => Avatar::new()
+            .src(url)
+            .name(username.clone())
+            .with_size(gpui_component::Size::Small),
+        None => Avatar::new()
+            .name(username.clone())
+            .with_size(gpui_component::Size::Small),
+    };
 
     div()
         .id(("msg", msg_id))
@@ -200,11 +223,7 @@ fn render_message_bubble(
         .w_full()
         .when(is_own_message, |this| this.flex_row_reverse())
         .when(is_pending, |this| this.opacity(0.6))
-        .child(
-            Avatar::new()
-                .name(username.clone())
-                .with_size(gpui_component::Size::Small),
-        )
+        .child(avatar)
         .child(
             div()
                 .flex()
@@ -388,7 +407,7 @@ fn normalize_leading_whitespace(line: &str) -> String {
         if in_prefix {
             match ch {
                 ' ' => normalized.push('\u{00A0}'),
-                '\t' => normalized.extend(std::iter::repeat('\u{00A0}').take(4)),
+                '\t' => normalized.extend(repeat_n('\u{00A0}', 4)),
                 _ => {
                     in_prefix = false;
                     normalized.push(ch);
