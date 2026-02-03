@@ -1,6 +1,6 @@
 use crate::app::ClickLiteApp;
 use crate::ui::rich_text::RichText;
-use crate::ui::stable_u64_hash;
+use crate::ui::{AVATAR_SIZE, MESSAGE_BUBBLE_MAX_WIDTH, MESSAGE_COLUMN_MAX_WIDTH, stable_u64_hash};
 use gpui::{Context, IntoElement, Window, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::Disableable;
@@ -28,6 +28,20 @@ fn render_messages(
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
     let scroll_handle = app.scroll_handle.clone();
+    let content = if app.selected_channel.is_some() {
+        div()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(MESSAGE_COLUMN_MAX_WIDTH))
+                    .child(render_message_list(app, window, cx)),
+            )
+            .into_any_element()
+    } else {
+        render_welcome_message(cx)
+    };
 
     div()
         .id("chat_messages")
@@ -36,11 +50,7 @@ fn render_messages(
         .overflow_y_scroll()
         .track_scroll(&scroll_handle)
         .p_4()
-        .child(if app.selected_channel.is_some() {
-            render_message_list(app, window, cx)
-        } else {
-            render_welcome_message(cx)
-        })
+        .child(content)
 }
 
 fn render_message_list(
@@ -50,23 +60,40 @@ fn render_message_list(
 ) -> gpui::AnyElement {
     let current_user_id = app.user.as_ref().map(|u| u.id.to_string());
     let messages: Vec<_> = app.messages().collect();
-    let mut rendered_messages = Vec::with_capacity(messages.len());
+    let mut groups: Vec<MessageGroup> = Vec::new();
     for msg in messages {
         let is_own_message = current_user_id
             .as_ref()
             .map(|id| *id == msg.creator_id())
             .unwrap_or(false);
-        rendered_messages
-            .push(render_message_bubble(msg, is_own_message, window, cx).into_any_element());
+        let creator_id = msg.creator_id().to_string();
+        let username = msg.creator_name();
+        let is_pending = msg.pending;
+
+        if let Some(last) = groups.last_mut() {
+            if last.creator_id == creator_id && last.is_own == is_own_message {
+                last.messages.push(msg);
+                last.has_pending |= is_pending;
+                continue;
+            }
+        }
+
+        groups.push(MessageGroup {
+            creator_id,
+            username,
+            is_own: is_own_message,
+            has_pending: is_pending,
+            messages: vec![msg],
+        });
     }
 
-    let has_messages = !rendered_messages.is_empty();
+    let has_messages = !groups.is_empty();
 
     div()
         .flex()
         .flex_col()
         .w_full()
-        .gap_3()
+        .gap_4()
         .when(app.messages_loading, |this| {
             this.child(render_messages_loading_placeholder(cx))
         })
@@ -80,8 +107,87 @@ fn render_message_list(
                 ),
             )
         })
-        .children(rendered_messages)
+        .children(
+            groups
+                .iter()
+                .map(|group| render_message_group(group, window, cx).into_any_element()),
+        )
         .into_any_element()
+}
+
+struct MessageGroup<'a> {
+    creator_id: String,
+    username: String,
+    is_own: bool,
+    has_pending: bool,
+    messages: Vec<&'a crate::api::ChatMessage>,
+}
+
+fn render_message_group(
+    group: &MessageGroup<'_>,
+    window: &mut Window,
+    cx: &mut Context<ClickLiteApp>,
+) -> impl IntoElement {
+    let header_inner = div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .when(group.is_own, |this| this.flex_row_reverse())
+        .child(render_message_avatar(&group.username, cx))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .when(group.is_own, |this| this.flex_row_reverse())
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(group.username.clone()),
+                )
+                .when(group.has_pending, |this| {
+                    this.child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .px_2()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(cx.theme().muted.opacity(0.5))
+                            .child("Sending"),
+                    )
+                }),
+        );
+
+    let header = div()
+        .flex()
+        .justify_start()
+        .when(group.is_own, |this| this.justify_end())
+        .child(header_inner);
+
+    let bubble_indent = px(AVATAR_SIZE + 12.0);
+
+    let message_stack =
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .w_full()
+            .when(group.is_own, |this| this.items_end().pr(bubble_indent))
+            .when(!group.is_own, |this| this.items_start().pl(bubble_indent))
+            .children(group.messages.iter().map(|msg| {
+                render_message_bubble(msg, group.is_own, window, cx).into_any_element()
+            }));
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .w_full()
+        .child(header)
+        .child(message_stack)
 }
 
 fn render_messages_loading_placeholder(cx: &Context<ClickLiteApp>) -> gpui::AnyElement {
@@ -152,7 +258,7 @@ fn render_message_skeleton(
                 .flex()
                 .flex_col()
                 .gap_1()
-                .max_w(px(500.0))
+                .max_w(px(MESSAGE_BUBBLE_MAX_WIDTH))
                 .items_start()
                 .when(is_own_message, |this| this.items_end())
                 .child(
@@ -168,7 +274,7 @@ fn render_message_skeleton(
                         .py_2()
                         .rounded_lg()
                         .bg(bubble_bg)
-                        .max_w(px(500.0))
+                        .max_w(px(MESSAGE_BUBBLE_MAX_WIDTH))
                         .child(bubble_lines),
                 ),
         )
@@ -181,90 +287,34 @@ fn render_message_bubble(
     window: &mut Window,
     cx: &mut Context<ClickLiteApp>,
 ) -> impl IntoElement {
-    let username = msg.creator_name();
     let msg_id = stable_u64_hash(&msg.id);
     let message_content = msg.display_content();
     let is_pending = msg.pending;
 
-    // Simple custom avatar with proper sizing (32px circle, small text)
-    let initials = extract_initials(&username);
-    let (avatar_bg, avatar_text) = avatar_color_for_name(&username, cx);
-    let avatar = div()
-        .size(px(32.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .flex_shrink_0()
-        .rounded_full()
-        .bg(avatar_bg)
-        .text_color(avatar_text)
-        .text_xs()
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .child(initials);
-
     div()
         .id(("msg", msg_id))
         .flex()
-        .gap_3()
-        .w_full()
-        .when(is_own_message, |this| this.flex_row_reverse())
         .when(is_pending, |this| this.opacity(0.6))
-        .child(avatar)
         .child(
             div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .max_w(px(500.0))
-                .items_start()
-                .when(is_own_message, |this| this.items_end())
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .when(is_own_message, |this| this.flex_row_reverse())
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(cx.theme().foreground)
-                                .child(username),
-                        )
-                        .when(is_pending, |this| {
-                            this.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("Sending..."),
-                            )
-                        }),
-                )
-                .child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .rounded_lg()
-                        .bg(if is_own_message {
-                            cx.theme().primary
-                        } else {
-                            cx.theme().secondary
-                        })
-                        .text_sm()
-                        .text_color(if is_own_message {
-                            cx.theme().primary_foreground
-                        } else {
-                            cx.theme().secondary_foreground
-                        })
-                        .max_w(px(500.0))
-                        .child(render_message_content(
-                            msg_id,
-                            &message_content,
-                            is_own_message,
-                            window,
-                            cx,
-                        )),
-                ),
+                .px_3()
+                .py_2()
+                .rounded_lg()
+                .bg(if is_own_message {
+                    cx.theme().primary.opacity(0.18)
+                } else {
+                    cx.theme().secondary.opacity(0.6)
+                })
+                .text_sm()
+                .text_color(cx.theme().foreground)
+                .max_w(px(MESSAGE_BUBBLE_MAX_WIDTH))
+                .child(render_message_content(
+                    msg_id,
+                    &message_content,
+                    is_own_message,
+                    window,
+                    cx,
+                )),
         )
 }
 
@@ -275,20 +325,10 @@ fn render_message_content(
     window: &mut Window,
     cx: &mut Context<ClickLiteApp>,
 ) -> gpui::AnyElement {
-    let base_text_color = if is_own_message {
-        cx.theme().primary_foreground
-    } else {
-        cx.theme().secondary_foreground
-    };
-
-    let code_bg = if is_own_message {
-        cx.theme().primary_foreground.opacity(0.15)
-    } else {
-        cx.theme().secondary_foreground.opacity(0.15)
-    };
-
+    let base_text_color = cx.theme().foreground;
+    let code_bg = cx.theme().muted.opacity(0.5);
     let link_color = if is_own_message {
-        cx.theme().primary_foreground
+        cx.theme().foreground
     } else {
         cx.theme().link
     };
@@ -320,6 +360,23 @@ fn render_welcome_message(cx: &Context<ClickLiteApp>) -> gpui::AnyElement {
         .into_any_element()
 }
 
+fn render_message_avatar(username: &str, cx: &Context<ClickLiteApp>) -> impl IntoElement {
+    let initials = extract_initials(username);
+    let (avatar_bg, avatar_text) = avatar_color_for_name(username, cx);
+    div()
+        .size(px(AVATAR_SIZE))
+        .flex()
+        .items_center()
+        .justify_center()
+        .flex_shrink_0()
+        .rounded_full()
+        .bg(avatar_bg)
+        .text_color(avatar_text)
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .child(initials)
+}
+
 fn render_input_area(
     app: &ClickLiteApp,
     _window: &Window,
@@ -342,6 +399,7 @@ fn render_input_area(
         .py_3()
         .border_t_1()
         .border_color(cx.theme().border)
+        .bg(cx.theme().background)
         .flex()
         .gap_2()
         .child(render_text_input(app))
@@ -388,10 +446,10 @@ fn avatar_color_for_name(name: &str, cx: &Context<ClickLiteApp>) -> (gpui::Hsla,
 
     // Hash the name to get a consistent index
     let hash = stable_u64_hash(name);
-    
+
     // Use 24 different hues (every 15 degrees on the color wheel)
     let hue = ((hash % 24) * 15) as f32 / 360.0;
-    
+
     // Get the base blue color and shift its hue
     let base_color = cx.theme().blue;
     let color = gpui::Hsla {
@@ -400,7 +458,7 @@ fn avatar_color_for_name(name: &str, cx: &Context<ClickLiteApp>) -> (gpui::Hsla,
         l: base_color.l,
         a: base_color.a,
     };
-    
+
     // Background is the color at 20% opacity, text is the full color
     (color.opacity(0.2), color)
 }

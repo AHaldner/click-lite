@@ -1,11 +1,12 @@
 use crate::app::ClickLiteApp;
+use crate::ui::HEADER_HEIGHT;
 use gpui::{Context, IntoElement, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
 
 pub fn render_header(app: &mut ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl IntoElement {
     div()
         .id("header")
-        .h(px(56.0))
+        .h(px(HEADER_HEIGHT))
         .flex_none()
         .flex()
         .items_center()

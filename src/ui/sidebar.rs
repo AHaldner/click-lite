@@ -1,5 +1,5 @@
 use crate::app::ClickLiteApp;
-use crate::ui::stable_u64_hash;
+use crate::ui::{HEADER_HEIGHT, SIDEBAR_WIDTH, stable_u64_hash};
 use gpui::{Context, IntoElement, div, img, prelude::*, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::Selectable;
@@ -11,22 +11,22 @@ use gpui_component::skeleton::Skeleton;
 pub fn render_sidebar(app: &mut ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl IntoElement {
     div()
         .id("sidebar")
-        .w(px(260.0))
+        .w(px(SIDEBAR_WIDTH))
         .flex_none()
         .flex()
         .flex_col()
         .bg(cx.theme().background)
         .border_r_1()
         .border_color(cx.theme().border)
-        .child(render_sidebar_header(cx))
-        .child(render_channels_header(cx))
+        .child(render_sidebar_header(app, cx))
+        .child(render_channels_header(app, cx))
         .child(render_channel_list(app, cx))
         .child(render_sidebar_footer(app, cx))
 }
 
-fn render_sidebar_header(cx: &Context<ClickLiteApp>) -> impl IntoElement {
+fn render_sidebar_header(_app: &ClickLiteApp, cx: &Context<ClickLiteApp>) -> impl IntoElement {
     div()
-        .h(px(56.0))
+        .h(px(HEADER_HEIGHT))
         .flex_none()
         .px_4()
         .py_0()
@@ -34,7 +34,6 @@ fn render_sidebar_header(cx: &Context<ClickLiteApp>) -> impl IntoElement {
         .border_color(cx.theme().border)
         .flex()
         .items_center()
-        .gap_2()
         .child(
             div()
                 .text_lg()
@@ -43,14 +42,20 @@ fn render_sidebar_header(cx: &Context<ClickLiteApp>) -> impl IntoElement {
         )
 }
 
-fn render_channels_header(cx: &Context<ClickLiteApp>) -> impl IntoElement {
+fn render_channels_header(app: &ClickLiteApp, cx: &Context<ClickLiteApp>) -> impl IntoElement {
+    let count_label = if app.channels_loading {
+        "CHATS".to_string()
+    } else {
+        format!("CHATS ({})", app.channels.len())
+    };
+
     div()
         .px_3()
         .py_2()
         .text_xs()
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(cx.theme().muted_foreground)
-        .child("CHATS")
+        .child(count_label)
 }
 
 fn render_channel_list(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> impl IntoElement {
@@ -92,9 +97,9 @@ fn render_channel_list(app: &ClickLiteApp, cx: &mut Context<ClickLiteApp>) -> im
                     .label(format!("{}{}", channel_clone.icon_prefix(), display_name))
                     .on_click({
                         let app_entity = app_entity.clone();
-                        move |_ev, _window, cx| {
+                        move |_ev, window, cx| {
                             app_entity.update(cx, |this, cx| {
-                                this.select_channel(channel_clone.clone(), cx);
+                                this.select_channel(channel_clone.clone(), window, cx);
                             });
                         }
                     })

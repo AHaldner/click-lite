@@ -52,7 +52,10 @@ impl ClickUpApi {
         let response = self.client.get(avatar_url).send().ok()?;
         let response = crate::api::client::ensure_success(response).ok()?;
         let bytes = response.bytes().ok()?;
-        Some(Arc::new(Image::from_bytes(ImageFormat::Jpeg, bytes.to_vec())))
+        Some(Arc::new(Image::from_bytes(
+            ImageFormat::Jpeg,
+            bytes.to_vec(),
+        )))
     }
 
     pub fn get_team_members(&self, workspace_id: u64) -> Result<Vec<ClickUpUser>, AppError> {

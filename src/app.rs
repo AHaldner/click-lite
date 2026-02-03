@@ -78,17 +78,15 @@ impl ClickLiteApp {
     }
 
     fn set_message_input_placeholder(
-        &self,
+        &mut self,
         placeholder: impl Into<SharedString>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let placeholder: SharedString = placeholder.into();
         let input = self.message_input.clone();
-        let window_handle = self.window_handle;
-        let _ = cx.update_window(window_handle, move |_, window, cx| {
-            input.update(cx, |state, cx| {
-                state.set_placeholder(placeholder, window, cx)
-            });
+        input.update(cx, |state, cx| {
+            state.set_placeholder(placeholder, window, cx);
         });
     }
 
@@ -270,17 +268,19 @@ impl ClickLiteApp {
         .detach();
     }
 
-    pub fn select_channel(&mut self, channel: ClickUpChatChannel, cx: &mut Context<Self>) {
+    pub fn select_channel(
+        &mut self,
+        channel: ClickUpChatChannel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.selected_channel = Some(channel.clone());
         self.server_messages.clear();
         self.pending_messages.clear();
         self.pending_ids.clear();
         self.set_message_input_placeholder(
-            format!(
-                "Message {}{}",
-                channel.icon_prefix(),
-                channel.display_name()
-            ),
+            format!("Message {}", channel.display_name()),
+            window,
             cx,
         );
         self.fetch_messages(&channel.id, cx);
