@@ -1,6 +1,6 @@
 use crate::app::ClickLiteApp;
 use crate::ui::stable_u64_hash;
-use gpui::{Context, IntoElement, img, div, prelude::*, px};
+use gpui::{Context, IntoElement, div, img, prelude::*, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::Selectable;
 use gpui_component::Sizable;

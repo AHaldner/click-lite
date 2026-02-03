@@ -1,20 +1,12 @@
 use crate::app::ClickLiteApp;
+use crate::ui::rich_text::RichText;
 use crate::ui::stable_u64_hash;
 use gpui::{Context, IntoElement, Window, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::Disableable;
-use gpui_component::Sizable;
-use gpui_component::avatar::Avatar;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
 use gpui_component::skeleton::Skeleton;
-use gpui_component::text::{TextView, TextViewStyle};
-use regex::Regex;
-use std::iter::repeat_n;
-use std::sync::LazyLock;
-
-static LINK_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[\s*([^\]]*?)\s*\]\(([^)]+)\)").expect("Invalid regex"));
 
 pub fn render_chat_area(
     app: &mut ClickLiteApp,
@@ -194,10 +186,21 @@ fn render_message_bubble(
     let message_content = msg.display_content();
     let is_pending = msg.pending;
 
-    // Note: Profile pictures for message creators are not available without ClickUp Enterprise plan
-    let avatar = Avatar::new()
-        .name(username.clone())
-        .with_size(gpui_component::Size::Small);
+    // Simple custom avatar with proper sizing (32px circle, small text)
+    let initials = extract_initials(&username);
+    let (avatar_bg, avatar_text) = avatar_color_for_name(&username, cx);
+    let avatar = div()
+        .size(px(32.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .flex_shrink_0()
+        .rounded_full()
+        .bg(avatar_bg)
+        .text_color(avatar_text)
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .child(initials);
 
     div()
         .id(("msg", msg_id))
@@ -278,130 +281,20 @@ fn render_message_content(
         cx.theme().secondary_foreground
     };
 
-    let markdown = normalize_chat_markdown(content);
-    TextView::markdown(("msg_content", msg_id), markdown, window, cx)
-        .style(TextViewStyle::default().paragraph_gap(gpui::rems(0.25)))
-        .text_sm()
-        .text_color(base_text_color)
-        .selectable(true)
-        .into_any_element()
-}
+    let code_bg = if is_own_message {
+        cx.theme().primary_foreground.opacity(0.15)
+    } else {
+        cx.theme().secondary_foreground.opacity(0.15)
+    };
 
-fn normalize_chat_markdown(content: &str) -> String {
-    let content = fix_clickup_links(content);
+    let link_color = if is_own_message {
+        cx.theme().primary_foreground
+    } else {
+        cx.theme().link
+    };
 
-    let mut output = String::with_capacity(content.len() * 2);
-    let mut in_fence = false;
-    let mut fence_char: char = '`';
-    let mut fence_len: usize = 0;
-
-    let mut lines = content.lines().peekable();
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim_start();
-        let mut close_fence_after_line = false;
-
-        if let Some((ch, len)) = fence_marker(trimmed) {
-            if !in_fence {
-                in_fence = true;
-                fence_char = ch;
-                fence_len = len;
-            } else if fence_char == ch && len >= fence_len {
-                close_fence_after_line = true;
-            }
-        }
-
-        if in_fence {
-            output.push_str(line);
-        } else {
-            output.push_str(&normalize_leading_whitespace(line));
-        }
-
-        if lines.peek().is_some() {
-            if in_fence {
-                output.push('\n');
-            } else {
-                output.push_str("\n\n");
-            }
-        }
-
-        if close_fence_after_line {
-            in_fence = false;
-        }
-    }
-
-    output
-}
-
-fn fix_clickup_links(content: &str) -> String {
-    let result = LINK_REGEX.replace_all(content, |caps: &regex::Captures| {
-        let display_text = &caps[1];
-        let url = &caps[2];
-
-        let clean_display: String = display_text
-            .replace("\\_", "_")
-            .replace("\\", "")
-            .split_whitespace()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let final_display = if clean_display.contains("http") {
-            clean_display
-                .split_whitespace()
-                .next()
-                .unwrap_or(&clean_display)
-                .to_string()
-        } else {
-            clean_display
-        };
-
-        let clean_url = url.replace("\\_", "_").replace("\\", "");
-
-        format!("[{}]({})", final_display, clean_url)
-    });
-
-    result.into_owned()
-}
-
-fn fence_marker(line: &str) -> Option<(char, usize)> {
-    let mut chars = line.chars();
-    let first = chars.next()?;
-    if first != '`' && first != '~' {
-        return None;
-    }
-
-    let mut count = 1;
-    for ch in chars {
-        if ch == first {
-            count += 1;
-        } else {
-            break;
-        }
-    }
-
-    (count >= 3).then_some((first, count))
-}
-
-fn normalize_leading_whitespace(line: &str) -> String {
-    let mut normalized = String::with_capacity(line.len());
-    let mut in_prefix = true;
-
-    for ch in line.chars() {
-        if in_prefix {
-            match ch {
-                ' ' => normalized.push('\u{00A0}'),
-                '\t' => normalized.extend(repeat_n('\u{00A0}', 4)),
-                _ => {
-                    in_prefix = false;
-                    normalized.push(ch);
-                }
-            }
-        } else {
-            normalized.push(ch);
-        }
-    }
-
-    normalized
+    let rich_text = RichText::from_markdown(content, code_bg, link_color);
+    rich_text.element(("msg_content", msg_id), base_text_color, window, cx)
 }
 
 fn render_welcome_message(cx: &Context<ClickLiteApp>) -> gpui::AnyElement {
@@ -472,4 +365,42 @@ fn render_text_input(app: &ClickLiteApp) -> impl IntoElement {
         .disabled(app.selected_channel.is_none())
         .w_full()
         .flex_1()
+}
+
+/// Extract initials from a name (e.g., "John Doe" -> "JD", "alice" -> "AL")
+fn extract_initials(name: &str) -> String {
+    let mut result: String = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .collect();
+
+    if result.len() == 1 {
+        result = name.chars().take(2).collect();
+    }
+
+    result.to_uppercase()
+}
+
+/// Generate a consistent color for a username (same name = same color)
+fn avatar_color_for_name(name: &str, cx: &Context<ClickLiteApp>) -> (gpui::Hsla, gpui::Hsla) {
+    use gpui_component::ActiveTheme;
+
+    // Hash the name to get a consistent index
+    let hash = stable_u64_hash(name);
+    
+    // Use 24 different hues (every 15 degrees on the color wheel)
+    let hue = ((hash % 24) * 15) as f32 / 360.0;
+    
+    // Get the base blue color and shift its hue
+    let base_color = cx.theme().blue;
+    let color = gpui::Hsla {
+        h: hue,
+        s: base_color.s,
+        l: base_color.l,
+        a: base_color.a,
+    };
+    
+    // Background is the color at 20% opacity, text is the full color
+    (color.opacity(0.2), color)
 }

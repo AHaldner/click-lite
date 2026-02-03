@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use click_lite::app::ClickLiteApp;
 use click_lite::error::AppError;
 use gpui::{
@@ -7,6 +5,7 @@ use gpui::{
 };
 use gpui_component::input::InputState;
 use gpui_component::{Root, Theme, ThemeRegistry};
+use std::path::PathBuf;
 
 fn main() {
     let _ = dotenvy::dotenv();
